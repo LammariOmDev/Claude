@@ -75,6 +75,7 @@
             gap: 20px;
             flex-wrap: wrap;
             align-items: center;
+            justify-content: space-between;
         }
 
         .search-box {
@@ -146,6 +147,20 @@
         .file-upload label:hover {
             background: #5568d3;
             transform: translateY(-2px);
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(102, 126, 234, 0.3);
+            border-radius: 50%;
+            border-top-color: #667eea;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
         }
 
         .stats {
@@ -446,12 +461,6 @@
         </div>
 
         <div class="controls">
-            <div class="file-upload">
-                <input type="file" id="fileInput" accept=".xlsx,.xls">
-                <label for="fileInput">📁 Charger cpr.xlsx</label>
-                <span id="fileName" style="color: #667eea; font-weight: 600;"></span>
-            </div>
-
             <div class="search-box">
                 <input type="text" id="searchInput" placeholder="🔍 Rechercher dans la base de données...">
             </div>
@@ -483,7 +492,8 @@
 
         <div class="table-container">
             <div class="loading" id="loading">
-                Veuillez charger le fichier cpr.xlsx pour commencer
+                <div class="loading-spinner"></div>
+                <p style="margin-top: 15px;">Chargement des données...</p>
             </div>
             <table id="dataTable" style="display: none;">
                 <thead id="tableHead"></thead>
@@ -527,8 +537,6 @@
         let cprColumnIndex = -1;
         let nomCommColumnIndex = -1;
 
-        const fileInput = document.getElementById('fileInput');
-        const fileName = document.getElementById('fileName');
         const searchInput = document.getElementById('searchInput');
         const rowsPerPageSelect = document.getElementById('rowsPerPage');
         const loading = document.getElementById('loading');
@@ -543,7 +551,9 @@
         const modalContent = document.getElementById('modalContent');
         const closeModal = document.querySelector('.close');
 
-        fileInput.addEventListener('change', handleFile);
+        // Charger automatiquement le fichier au démarrage
+        window.addEventListener('DOMContentLoaded', loadExcelFile);
+
         searchInput.addEventListener('input', handleSearch);
         rowsPerPageSelect.addEventListener('change', handleRowsPerPageChange);
 
@@ -561,6 +571,115 @@
                 modal.style.display = 'none';
             }
         });
+
+        async function loadExcelFile() {
+            try {
+                loading.style.display = 'block';
+                dataTable.style.display = 'none';
+                noData.style.display = 'none';
+                stats.style.display = 'none';
+                pagination.style.display = 'none';
+
+                const response = await fetch('cpr.xlsx');
+                if (!response.ok) {
+                    throw new Error('Fichier cpr.xlsx introuvable');
+                }
+                
+                const arrayBuffer = await response.arrayBuffer();
+                const data = new Uint8Array(arrayBuffer);
+                const workbook = XLSX.read(data, { type: 'array' });
+                const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
+
+                if (jsonData.length > 0) {
+                    headers = jsonData[0];
+                    const numColumns = headers.length;
+                    
+                    // Trouver les index des colonnes CPR et Nom Comm.
+                    cprColumnIndex = headers.findIndex(h => h && h.toString().toLowerCase().includes('cpr'));
+                    nomCommColumnIndex = headers.findIndex(h => h && h.toString().toLowerCase().includes('nom comm'));
+                    
+                    // Normaliser toutes les lignes pour qu'elles aient le même nombre de colonnes
+                    allData = jsonData.slice(1)
+                        .filter(row => row.some(cell => cell !== null && cell !== undefined && cell !== ''))
+                        .map(row => {
+                            // S'assurer que chaque ligne a le bon nombre de colonnes
+                            const normalizedRow = [];
+                            for (let i = 0; i < numColumns; i++) {
+                                normalizedRow[i] = row[i] !== undefined && row[i] !== null ? row[i] : '';
+                            }
+                            return normalizedRow;
+                        });
+                    
+                    filteredData = [...allData];
+                    currentPage = 1;
+                    
+                    renderTable();
+                    updateStats();
+                    loading.style.display = 'none';
+                    stats.style.display = 'flex';
+                }
+            } catch (error) {
+                loading.innerHTML = '❌ Erreur: Impossible de charger le fichier cpr.xlsx<br><small>Assurez-vous que le fichier se trouve dans le même dossier que index.html</small>';
+                console.error(error);
+            }
+        }
+
+        async function handleFile(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            fileName.textContent = file.name;
+            loading.textContent = '⏳ Chargement des données...';
+            loading.style.display = 'block';
+            dataTable.style.display = 'none';
+            noData.style.display = 'none';
+            stats.style.display = 'none';
+            pagination.style.display = 'none';
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                    const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
+
+                    if (jsonData.length > 0) {
+                        headers = jsonData[0];
+                        const numColumns = headers.length;
+                        
+                        // Trouver les index des colonnes CPR et Nom Comm.
+                        cprColumnIndex = headers.findIndex(h => h && h.toString().toLowerCase().includes('cpr'));
+                        nomCommColumnIndex = headers.findIndex(h => h && h.toString().toLowerCase().includes('nom comm'));
+                        
+                        // Normaliser toutes les lignes pour qu'elles aient le même nombre de colonnes
+                        allData = jsonData.slice(1)
+                            .filter(row => row.some(cell => cell !== null && cell !== undefined && cell !== ''))
+                            .map(row => {
+                                // S'assurer que chaque ligne a le bon nombre de colonnes
+                                const normalizedRow = [];
+                                for (let i = 0; i < numColumns; i++) {
+                                    normalizedRow[i] = row[i] !== undefined && row[i] !== null ? row[i] : '';
+                                }
+                                return normalizedRow;
+                            });
+                        
+                        filteredData = [...allData];
+                        currentPage = 1;
+                        
+                        renderTable();
+                        updateStats();
+                        loading.style.display = 'none';
+                        stats.style.display = 'flex';
+                    }
+                } catch (error) {
+                    loading.textContent = '❌ Erreur lors du chargement du fichier';
+                    console.error(error);
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
 
         async function handleFile(e) {
             const file = e.target.files[0];
@@ -656,7 +775,7 @@
 
             // Render headers (remplacer CPR par Actions)
             const displayHeaders = headers.map((h, idx) => 
-                idx === cprColumnIndex ? 'Actions' : h
+                idx === cprColumnIndex ? 'CPR' : h
             );
             tableHead.innerHTML = '<tr>' + displayHeaders.map(h => `<th>${h}</th>`).join('') + '</tr>';
 
